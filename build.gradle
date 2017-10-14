@@ -2,6 +2,11 @@ group 'ru.kulikovd'
 
 apply plugin: 'scala'
 
+repositories {
+    mavenCentral()
+    jcenter()
+}
+
 dependencies {
     compile 'org.scala-lang:scala-library:2.12.3'
     compile 'org.scala-lang.modules:scala-java8-compat_2.12:0.8.0'
