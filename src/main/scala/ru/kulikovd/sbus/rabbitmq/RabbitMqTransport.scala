@@ -1,4 +1,4 @@
-package eu.inn.sbus.rabbitmq
+package ru.kulikovd.sbus.rabbitmq
 
 import java.util.UUID
 import scala.collection.JavaConverters._
@@ -6,7 +6,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
-import akka.pattern.ask
+import akka.pattern.{AskTimeoutException, ask}
 import akka.util.Timeout
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.github.sstone.amqp._
@@ -16,13 +16,12 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
-
-import eu.inn.sbus.model._
+import ru.kulikovd.sbus.model._
 
 
 class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMapper) extends Transport {
 
-  implicit val defaultTimeout = Timeout(17.seconds)
+  implicit val defaultTimeout = Timeout(12.seconds)
   implicit val ec = actorSystem.dispatcher
 
   private val log = Logger(LoggerFactory.getLogger("sbus.rabbitmq"))
@@ -35,14 +34,15 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
   }, 3.seconds), name = "rabbitmq-connection")
 
   private val ChannelParams  = Amqp.ChannelParameters(qos = conf.getInt("prefetch-count"), global = false)
-  private val CommonExchange = Amqp.StandardExchanges.amqDirect
-  private val RetryExchange  = Amqp.StandardExchanges.amqFanout
+  private val CommonExchange = Amqp.ExchangeParameters(conf.getString("exchange"), passive = false, exchangeType = "direct")
+  private val RetryExchange  = Amqp.ExchangeParameters(conf.getString("retry-exchange"), passive = false, exchangeType = "fanout")
 
   private val producer = {
     val child = ConnectionOwner.createChildActor(connection, ChannelOwner.props())
     Amqp.waitForConnection(actorSystem, child).await()
 
     for {
+      _ ← child ? Amqp.DeclareExchange(CommonExchange)
       _ ← child ? Amqp.DeclareExchange(RetryExchange)
 
       _ ← child ? Amqp.DeclareQueue(
@@ -60,6 +60,8 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     child
   }
 
+  /**
+   */
   def send(routingKey: String, msg: Any, context: Context, responseClass: Class[_]): Future[Any] = {
     val bytes = mapper.writeValueAsBytes(Message(routingKey = routingKey, body = Option(msg)))
 
@@ -83,7 +85,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
     val pub = Amqp.Publish(CommonExchange.name, routingKey, bytes, Some(props))
 
-    if (responseClass != null) {
+    (if (responseClass != null) {
       rpcClient.ask(RpcClient.Request(pub))(context.timeout.fold(defaultTimeout)(_.millis)) map {
         case RpcClient.Response(deliveries) ⇒
           logs("resp <~~~", routingKey, deliveries.head.body, corrId)
@@ -105,14 +107,24 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
         case _: Amqp.Ok ⇒ // ok
         case error ⇒ throw new ErrorMessage(500, "Error on publish message to " + routingKey + ": " + error)
       }
+    }) recover {
+      case e: AskTimeoutException ⇒
+        logs("timeout error", routingKey, bytes, corrId)
+        throw new ErrorMessage(406, s"Timeout on `$routingKey` with message: $msg", e)
+
+      case e: Throwable ⇒
+        logs("error", routingKey, bytes, corrId)
+        throw e
     }
   }
 
+  /**
+   */
   def subscribe[T](routingKey: String, messageClass: Class[_], handler: (T, Context) ⇒ Future[Any]): Unit = {
     val processor = new RpcServer.IProcessor {
 
       def process(delivery: Amqp.Delivery): Future[RpcServer.ProcessResult] = {
-        try {
+        (try {
           logs("<~~~", routingKey, delivery.body, getCorrelationId(delivery))
 
           val payload = (mapper.readTree(delivery.body).get("body") match {
@@ -132,13 +144,10 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
               RpcServer.ProcessResult(Some(bytes))
 
           } recoverWith {
-            case e: UnrecoverableFailure ⇒
-              Future.failed(e)
-
-            case e: Throwable ⇒
-              val heads = delivery.properties.getHeaders
+            case e: Throwable if !e.isInstanceOf[UnrecoverableFailure] ⇒
+              val heads       = delivery.properties.getHeaders
               val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
-              val attemptNr = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
+              val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
 
               if (attemptsMax.exists(_ >= attemptNr)) {
                 heads.put(Headers.RetryAttemptNr, s"${attemptNr + 1}")
@@ -148,11 +157,11 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
                   .expiration(s"${math.pow(2, math.min(attemptNr - 1, 7)).round * 1000}") // millis, exponential backoff
                   .build()
 
-                log.warn(s"Error on handle `$routingKey`: $e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...", e)
+                logs("error", routingKey, s"$e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...".getBytes, getCorrelationId(delivery), e)
 
                 producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
                   case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
-                  case error ⇒ throw new ErrorMessage(500, "Error on publish retry message for " + routingKey + ": " + error)
+                  case error      ⇒ throw new ErrorMessage(500, "Error on publish retry message for " + routingKey + ": " + error)
                 }
               } else {
                 Future.failed(e)
@@ -160,11 +169,13 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
           }
         } catch {
           case e: Throwable ⇒ Future.failed(e)
+        }) recover {
+          case e: Throwable ⇒ onFailure(delivery, e)
         }
       }
 
       def onFailure(delivery: Amqp.Delivery, e: Throwable): RpcServer.ProcessResult = {
-        log.error(s"Error on handle `$routingKey`: $e", e)
+        logs("error", routingKey, e.toString.getBytes, getCorrelationId(delivery), e)
 
         if (delivery.properties.getReplyTo != null) {
           val response = e match {
@@ -201,13 +212,14 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     if (id == null) null else id.toString
   }
 
-  private def logs(prefix: String, routingKey: String, body: Array[Byte], correlationId: String) {
+  private def logs(prefix: String, routingKey: String, body: Array[Byte], correlationId: String, e: Throwable = null) {
     if (log.underlying.isTraceEnabled) {
       if (correlationId != null) {
         MDC.put("correlation_id", correlationId)
       }
 
-      log.trace("sbus " + prefix + " " + routingKey + ": " + new String(body.take(512)))
+      val msg = s"sbus $prefix $routingKey: ${new String(body.take(512))}"
+      if (e == null) log.trace(msg) else log.error(msg, e)
     }
   }
 }

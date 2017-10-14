@@ -1,4 +1,4 @@
-package eu.inn.sbus.model
+package ru.kulikovd.sbus.model
 
 case class Response(
   status: Int,

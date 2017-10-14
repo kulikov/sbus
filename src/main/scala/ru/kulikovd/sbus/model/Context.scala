@@ -1,4 +1,4 @@
-package eu.inn.sbus.model
+package ru.kulikovd.sbus.model
 
 import scala.collection.JavaConverters._
 
@@ -17,7 +17,7 @@ case class Context(data: Map[String, Any] = Map.empty) {
   def withCorrelationId(id: String) = copy(data = data + (Headers.CorrelationId → id))
   def withTimeout(millis: Long) = copy(data = data + (Headers.Timeout → millis))
   def withTimeout(to: Timeout) = copy(data = data + (Headers.Timeout → to.duration.toMillis))
-  def withMaxRetries(max: Int) = copy(data = data + (Headers.RetryAttemptsMax → max))
+  def withRetries(max: Int) = copy(data = data + (Headers.RetryAttemptsMax → max))
 }
 
 
@@ -28,7 +28,7 @@ object Context {
   def withCorrelationId(id: String) = Context().withCorrelationId(id)
   def withTimeout(millis: Long) = Context().withTimeout(millis)
   def withTimeout(to: Timeout) = Context().withTimeout(to)
-  def withMaxRetries(max: Int) = Context().withMaxRetries(max)
+  def withRetries(max: Int) = Context().withRetries(max)
 
   def from(delivery: Amqp.Delivery) = {
     val heads = delivery.properties.getHeaders.asScala.filterKeys(Headers.all).mapValues(_.toString).toMap

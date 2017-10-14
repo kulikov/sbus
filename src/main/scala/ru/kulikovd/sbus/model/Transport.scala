@@ -1,4 +1,4 @@
-package eu.inn.sbus.model
+package ru.kulikovd.sbus.model
 
 import scala.concurrent.Future
 
