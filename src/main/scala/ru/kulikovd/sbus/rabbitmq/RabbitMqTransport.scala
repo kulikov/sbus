@@ -25,7 +25,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
   implicit val defaultTimeout = Timeout(17.seconds)
   implicit val ec = actorSystem.dispatcher
 
-  private val log = getLogger("sbus.rabbitmq")
+  private val log = Logger(LoggerFactory.getLogger("sbus.rabbitmq"))
 
   private val connection = actorSystem.actorOf(ConnectionOwner.props({
     val cf = new ConnectionFactory()

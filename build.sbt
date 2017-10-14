@@ -28,6 +28,7 @@ javacOptions ++= Seq(
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % "2.5.6",
 
+  "com.fasterxml.jackson.core" % "jackson-databind" % "2.9.1",
   "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.9.1",
 
   "com.rabbitmq" % "amqp-client" % "4.2.2",
