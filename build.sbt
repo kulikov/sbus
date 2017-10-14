@@ -1,4 +1,4 @@
-organization := "ru.kulikovd"
+organization := "eu.inn"
 
 name := "sbus"
 
