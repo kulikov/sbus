@@ -3,7 +3,7 @@ scala:
 - 2.12.3
 jdk:
 - oraclejdk8
-script: gradle test install
+script: gradle test build
 cache:
   directories:
   - $HOME/.m2
