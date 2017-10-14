@@ -1,4 +1,4 @@
-package ru.kulikovd.sbus.rabbitmq
+package eu.inn.sbus.rabbitmq
 
 import java.util.UUID
 import scala.collection.JavaConverters._
@@ -17,7 +17,7 @@ import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 
-import ru.kulikovd.sbus.model._
+import eu.inn.sbus.model._
 
 
 class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMapper) extends Transport {

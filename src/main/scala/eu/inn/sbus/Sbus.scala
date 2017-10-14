@@ -1,9 +1,9 @@
-package ru.kulikovd.sbus
+package eu.inn.sbus
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
-import ru.kulikovd.sbus.model.{Context, Transport}
+import eu.inn.sbus.model.{Context, Transport}
 
 
 class Sbus(transport: Transport)(implicit ec: ExecutionContext) {

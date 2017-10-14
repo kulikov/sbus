@@ -1,4 +1,4 @@
-package ru.kulikovd.sbus.model
+package eu.inn.sbus.model
 
 case class Message(
   routingKey: String,

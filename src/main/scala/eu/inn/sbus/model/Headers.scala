@@ -1,4 +1,4 @@
-package ru.kulikovd.sbus.model
+package eu.inn.sbus.model
 
 object Headers {
   val CorrelationId = "correlation-id"
