@@ -10,9 +10,7 @@ sbus.on[GetOrders, List[Order]]("get-orders") { (req, context) ⇒
   Future.successful(List(Order(), Order()))
 }
 
-sbus.request[List[Order]]("get-orders") { (orders, context) ⇒ 
-  Future {
-    println(orders)
-  }
+sbus.request[List[Order]]("get-orders") map { orders ⇒ 
+  println(orders)
 }
 ```
