@@ -1,5 +1,4 @@
-package ru.kulikovd.sbus.model
-
+package co.uk.vturbo.sbus.model
 
 class ErrorMessage(val code: Int, msg: String, cause: Throwable = null, val error: String = null, val _links: Option[Map[String, Any]] = None)
     extends RuntimeException(msg, cause)

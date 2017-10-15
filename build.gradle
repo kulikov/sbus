@@ -1,4 +1,4 @@
-group 'ru.kulikovd'
+group 'co.uk.vturbo'
 
 apply plugin: 'scala'
 

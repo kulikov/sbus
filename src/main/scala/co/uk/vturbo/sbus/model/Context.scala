@@ -1,4 +1,4 @@
-package ru.kulikovd.sbus.model
+package co.uk.vturbo.sbus.model
 
 import scala.collection.JavaConverters._
 

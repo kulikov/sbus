@@ -1,10 +1,10 @@
-package ru.kulikovd.sbus.javadsl
+package co.uk.vturbo.sbus.javadsl
 
 import java.util.concurrent.CompletableFuture
 import java.util.function.BiFunction
 import scala.compat.java8.FutureConverters._
 
-import ru.kulikovd.sbus.model.{Context, Transport}
+import co.uk.vturbo.sbus.model.{Context, Transport}
 
 
 class Sbus(transport: Transport) {
