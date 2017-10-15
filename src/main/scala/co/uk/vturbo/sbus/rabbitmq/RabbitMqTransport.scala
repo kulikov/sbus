@@ -62,6 +62,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     child
   }
 
+
   /**
    */
   def send(routingKey: String, msg: Any, context: Context, responseClass: Class[_]): Future[Any] = {
@@ -92,13 +93,13 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
         case RpcClient.Response(deliveries) ⇒
           logs("resp <~~~", routingKey, deliveries.head.body, corrId)
 
-          val response = mapper.readValue(deliveries.head.body, classOf[Response])
+          val tree = mapper.readTree(deliveries.head.body)
 
-          if (response.status < 400)  {
-            mapper.convertValue(response.body, responseClass)
+          if (tree.get("status").asInt(200) < 400)  {
+            mapper.treeToValue(tree.get("body"), responseClass)
           } else {
-            val err = mapper.convertValue(response.body.orNull, classOf[ErrorResponseBody])
-            throw new ErrorMessage(response.status, err.message, error = err.error.orNull, _links = err._links)
+            val err = mapper.treeToValue(tree.get("body"), classOf[ErrorResponseBody])
+            throw new ErrorMessage(tree.get("status").asInt(), err.message, error = err.error.orNull, _links = err._links)
           }
 
         case other ⇒
