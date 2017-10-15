@@ -27,6 +27,8 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
   private val log = Logger(LoggerFactory.getLogger("sbus.rabbitmq"))
 
   private val connection = actorSystem.actorOf(ConnectionOwner.props({
+    log.debug("Sbus connecting to: " + conf.getString("host"))
+
     val cf = new ConnectionFactory()
     cf.setHost(conf.getString("host"))
     cf.setPort(conf.getInt("port"))
@@ -202,6 +204,8 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
       proc          = processor,
       channelParams = ChannelParams
     ))
+
+    log.debug("Sbus subscribed to: " + routingKey)
 
     Amqp.waitForConnection(actorSystem, child).await()
   }

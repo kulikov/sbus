@@ -3,7 +3,6 @@ package ru.kulikovd.sbus.javadsl
 import java.util.concurrent.CompletableFuture
 import java.util.function.BiFunction
 import scala.compat.java8.FutureConverters._
-import scala.concurrent.Future
 
 import ru.kulikovd.sbus.model.{Context, Transport}
 
@@ -39,14 +38,6 @@ class Sbus(transport: Transport) {
 
   def event(routingKey: String, message: Any, context: Context): CompletableFuture[Void] =
     transport.send(routingKey, message, context, null).toJava.toCompletableFuture.thenAccept(_ ⇒ {})
-
-  def onAsync[T](routingKey: String, requestClass: Class[T], handler: BiFunction[T, Context, _]) {
-    transport.subscribe[T](routingKey, requestClass, { (resp, ctx) ⇒
-      CompletableFuture.supplyAsync(() ⇒ {
-        handler.apply(resp, ctx)
-      }).toScala
-    })
-  }
 
   def on[T](routingKey: String, requestClass: Class[T], handler: BiFunction[T, Context, CompletableFuture[_]]) {
     transport.subscribe[T](routingKey, requestClass, { (resp, ctx) ⇒
