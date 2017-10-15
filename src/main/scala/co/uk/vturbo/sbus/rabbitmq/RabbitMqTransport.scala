@@ -113,7 +113,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     }) recover {
       case e: AskTimeoutException ⇒
         logs("timeout error", routingKey, bytes, corrId)
-        throw new ErrorMessage(406, s"Timeout on `$routingKey` with message: $msg", e)
+        throw new ErrorMessage(504, s"Timeout on `$routingKey` with message: $msg", e)
 
       case e: Throwable ⇒
         logs("error", routingKey, bytes, corrId)
