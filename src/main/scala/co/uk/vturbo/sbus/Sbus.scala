@@ -3,8 +3,6 @@ package co.uk.vturbo.sbus
 import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
-import co.uk.vturbo.sbus.model.Transport
-
 import co.uk.vturbo.sbus.model.{Context, Transport}
 
 

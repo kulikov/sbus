@@ -64,9 +64,10 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
 
   /**
+   *
    */
   def send(routingKey: String, msg: Any, context: Context, responseClass: Class[_]): Future[Any] = {
-    val bytes = mapper.writeValueAsBytes(Message(routingKey = routingKey, body = Option(msg)))
+    val bytes = mapper.writeValueAsBytes(new Message(routingKey, msg))
 
     val corrId = context.correlationId.getOrElse(UUID.randomUUID().toString)
 
@@ -95,11 +96,18 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
           val tree = mapper.readTree(deliveries.head.body)
 
-          if (tree.get("status").asInt(200) < 400)  {
-            mapper.treeToValue(tree.get("body"), responseClass)
+          val status =
+            if (tree.hasNonNull("status")) {
+              tree.path("status").asInt
+            } else if (tree.path("failed").asBoolean(false)) { // backward compatibility with old protocol
+              500
+            } else { 200 }
+
+          if (status < 400)  {
+            mapper.treeToValue(tree.path("body"), responseClass)
           } else {
-            val err = mapper.treeToValue(tree.get("body"), classOf[ErrorResponseBody])
-            throw new ErrorMessage(tree.get("status").asInt(), err.message, error = err.error.orNull, _links = err._links)
+            val err = mapper.treeToValue(tree.path("body"), classOf[ErrorResponseBody])
+            throw new ErrorMessage(status, err.getMessage, error = err.getError, _links = err.getLinks())
           }
 
         case other ⇒
@@ -112,16 +120,17 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
       }
     }) recover {
       case e: AskTimeoutException ⇒
-        logs("timeout error", routingKey, bytes, corrId)
+        logs("timeout error", routingKey, bytes, corrId, e)
         throw new ErrorMessage(504, s"Timeout on `$routingKey` with message: $msg", e)
 
       case e: Throwable ⇒
-        logs("error", routingKey, bytes, corrId)
+        logs("error", routingKey, bytes, corrId, e)
         throw e
     }
   }
 
   /**
+   *
    */
   def subscribe[T](routingKey: String, messageClass: Class[_], handler: (T, Context) ⇒ Future[Any]): Unit = {
     val processor = new RpcServer.IProcessor {
@@ -142,7 +151,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
             case re if re.isInstanceOf[Void] ⇒ RpcServer.ProcessResult(None)
 
             case result ⇒
-              val bytes = mapper.writeValueAsBytes(Response(status = 200, body = Some(result)))
+              val bytes = mapper.writeValueAsBytes(new Response(200, result))
               logs("resp ~~~>", routingKey, bytes, getCorrelationId(delivery))
               RpcServer.ProcessResult(Some(bytes))
 
@@ -182,11 +191,8 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
         if (delivery.properties.getReplyTo != null) {
           val response = e match {
-            case em: ErrorMessage ⇒
-              Response(status = em.code, body = Some(ErrorResponseBody(message = em.getMessage, error = Option(em.error), _links = em._links)))
-
-            case _ ⇒
-              Response(status = 500, body = Some(ErrorResponseBody(message = e.getMessage)))
+            case em: ErrorMessage ⇒ new Response(em.code, new ErrorResponseBody(em.getMessage, em.error, em._links))
+            case _                ⇒ new Response(500, new ErrorResponseBody(e.getMessage, null, null))
           }
 
           val bytes = mapper.writeValueAsBytes(response)
