@@ -1,6 +1,8 @@
 package co.uk.vturbo.sbus.rabbitmq
 
+import java.util
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -21,10 +23,17 @@ import co.uk.vturbo.sbus.model._
 
 class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMapper) extends Transport {
 
-  implicit val defaultTimeout = Timeout(12.seconds)
   implicit val ec = actorSystem.dispatcher
 
   private val log = Logger(LoggerFactory.getLogger("sbus.rabbitmq"))
+
+  implicit val defaultTimeout = Timeout(conf.getDuration("default-timeout").toMillis, TimeUnit.MILLISECONDS)
+
+  private val DefaultCommandRetries = conf.getInt("default-command-retries")
+  private val ChannelParams         = Amqp.ChannelParameters(qos = conf.getInt("prefetch-count"), global = false)
+  private val CommonExchange        = Amqp.ExchangeParameters(conf.getString("exchange"), passive = false, exchangeType = "direct")
+  private val RetryExchange         = Amqp.ExchangeParameters(conf.getString("retry-exchange"), passive = false, exchangeType = "fanout")
+
 
   private val connection = actorSystem.actorOf(ConnectionOwner.props({
     log.debug("Sbus connecting to: " + conf.getString("host"))
@@ -35,25 +44,21 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     cf
   }, 3.seconds), name = "rabbitmq-connection")
 
-  private val ChannelParams  = Amqp.ChannelParameters(qos = conf.getInt("prefetch-count"), global = false)
-  private val CommonExchange = Amqp.ExchangeParameters(conf.getString("exchange"), passive = false, exchangeType = "direct")
-  private val RetryExchange  = Amqp.ExchangeParameters(conf.getString("retry-exchange"), passive = false, exchangeType = "fanout")
-
   private val producer = {
-    val child = ConnectionOwner.createChildActor(connection, ChannelOwner.props())
-    Amqp.waitForConnection(actorSystem, child).await()
+    val channelOwner = ConnectionOwner.createChildActor(connection, ChannelOwner.props())
+    Amqp.waitForConnection(actorSystem, channelOwner).await()
 
     for {
-      _ ← child ? Amqp.DeclareExchange(CommonExchange)
-      _ ← child ? Amqp.DeclareExchange(RetryExchange)
+      _ ← channelOwner ? Amqp.DeclareExchange(CommonExchange)
+      _ ← channelOwner ? Amqp.DeclareExchange(RetryExchange)
 
-      _ ← child ? Amqp.DeclareQueue(
+      _ ← channelOwner ? Amqp.DeclareQueue(
         Amqp.QueueParameters("retries", passive = false, durable = true, exclusive = false, autodelete = false, args = Map("x-dead-letter-exchange" → CommonExchange.name)))
 
-      _ ← child ? Amqp.QueueBind("retries", RetryExchange.name, "#")
+      _ ← channelOwner ? Amqp.QueueBind("retries", RetryExchange.name, "#")
     } {}
 
-    child
+    channelOwner
   }
 
   private val rpcClient = {
@@ -76,18 +81,17 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
       .messageId(UUID.randomUUID().toString)
       .headers(Map(
         Headers.CorrelationId    → corrId,
-        Headers.RetryAttemptsMax → context.maxRetries.getOrElse(0)
+        Headers.RetryAttemptsMax → context.maxRetries.getOrElse(if (responseClass != null) 0 else DefaultCommandRetries) // commands retriable by default
       ).mapValues(_.toString.asInstanceOf[Object]).asJava)
 
-    context.timeout foreach { timeoutMs ⇒
-      propsBldr.expiration(timeoutMs.toString)
+    // timeout only for req/resp messages
+    if (responseClass != null && context.timeout.nonEmpty) {
+      propsBldr.expiration(context.timeout.get.toString)
     }
-
-    val props = propsBldr.build()
 
     logs("~~~>", routingKey, bytes, corrId)
 
-    val pub = Amqp.Publish(CommonExchange.name, routingKey, bytes, Some(props))
+    val pub = Amqp.Publish(CommonExchange.name, routingKey, bytes, Some(propsBldr.build()))
 
     (if (responseClass != null) {
       rpcClient.ask(RpcClient.Request(pub))(context.timeout.fold(defaultTimeout)(_.millis)) map {
@@ -107,11 +111,11 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
             mapper.treeToValue(tree.path("body"), responseClass)
           } else {
             val err = mapper.treeToValue(tree.path("body"), classOf[ErrorResponseBody])
-            throw new ErrorMessage(status, err.getMessage, error = err.getError, _links = err.getLinks())
+            throw new ErrorMessage(status, err.getMessage, error = err.getError, _links = err.getLinks)
           }
 
         case other ⇒
-          throw new ErrorMessage(500, "Unexpected request error " + routingKey + ":" + other)
+          throw new ErrorMessage(500, "Unexpected request result " + routingKey + ":" + other)
       }
     } else {
       producer ? pub map {
@@ -157,7 +161,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
           } recoverWith {
             case e: Throwable if !e.isInstanceOf[UnrecoverableFailure] ⇒
-              val heads       = delivery.properties.getHeaders
+              val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
               val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
               val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
 
@@ -204,7 +208,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
       }
     }
 
-    val child = ConnectionOwner.createChildActor(connection, RpcServer.props(
+    val rpcServer = ConnectionOwner.createChildActor(connection, RpcServer.props(
       queue         = Amqp.QueueParameters(routingKey, passive = false, durable = false, exclusive = false, autodelete = false),
       exchange      = CommonExchange,
       routingKey    = routingKey,
@@ -214,13 +218,17 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
     log.debug("Sbus subscribed to: " + routingKey)
 
-    Amqp.waitForConnection(actorSystem, child).await()
+    Amqp.waitForConnection(actorSystem, rpcServer).await()
   }
 
 
-  private def getCorrelationId(delivery: Amqp.Delivery) = {
-    val id = delivery.properties.getHeaders.get(Headers.CorrelationId)
-    if (id == null) null else id.toString
+  private def getCorrelationId(delivery: Amqp.Delivery): String = {
+    val heads = delivery.properties.getHeaders
+
+    if (heads != null) {
+      val id = heads.get(Headers.CorrelationId)
+      if (id == null) null else id.toString
+    } else null
   }
 
   private def logs(prefix: String, routingKey: String, body: Array[Byte], correlationId: String, e: Throwable = null) {
