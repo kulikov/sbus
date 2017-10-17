@@ -8,9 +8,9 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
-import akka.pattern.{AskTimeoutException, ask}
+import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.github.sstone.amqp._
 import com.rabbitmq.client.AMQP.BasicProperties
 import com.rabbitmq.client.ConnectionFactory
@@ -108,7 +108,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
             } else { 200 }
 
           if (status < 400)  {
-            mapper.treeToValue(tree.path("body"), responseClass)
+            deserializeToClass(tree.path("body"), responseClass)
           } else {
             val err = mapper.treeToValue(tree.path("body"), classOf[ErrorResponseBody])
             throw new ErrorMessage(status, err.getMessage, error = err.getError, _links = err.getLinks)
@@ -145,20 +145,18 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
           val payload = (mapper.readTree(delivery.body).get("body") match {
             case null ⇒ null
-            case body ⇒ mapper.treeToValue(body, messageClass)
+            case body ⇒ deserializeToClass(body, messageClass)
           }).asInstanceOf[T]
 
           (try handler(payload, Context.from(delivery)) catch {
             case e: Throwable ⇒ Future.failed(e)
           }) map {
-            case null | Unit                 ⇒ RpcServer.ProcessResult(None)
-            case re if re.isInstanceOf[Void] ⇒ RpcServer.ProcessResult(None)
-
-            case result ⇒
+            case result if delivery.properties.getReplyTo != null ⇒
               val bytes = mapper.writeValueAsBytes(new Response(200, result))
               logs("resp ~~~>", routingKey, bytes, getCorrelationId(delivery))
               RpcServer.ProcessResult(Some(bytes))
 
+            case _ ⇒ RpcServer.ProcessResult(None)
           } recoverWith {
             case e: Throwable if !e.isInstanceOf[UnrecoverableFailure] ⇒
               val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
@@ -221,6 +219,16 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     Amqp.waitForConnection(actorSystem, rpcServer).await()
   }
 
+
+  private def deserializeToClass(node: JsonNode, responseClass: Class[_]): Any = {
+    if (responseClass == java.lang.Void.TYPE) {
+      //
+    } else if (responseClass.isInstance(Unit)) {
+      //
+    } else {
+      mapper.treeToValue(node, responseClass)
+    }
+  }
 
   private def getCorrelationId(delivery: Amqp.Delivery): String = {
     val heads = delivery.properties.getHeaders
