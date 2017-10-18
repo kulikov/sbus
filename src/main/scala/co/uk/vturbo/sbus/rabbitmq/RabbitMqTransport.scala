@@ -74,11 +74,11 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
   def send(routingKey: String, msg: Any, context: Context, responseClass: Class[_]): Future[Any] = {
     val bytes = mapper.writeValueAsBytes(new Message(routingKey, msg))
 
-    val corrId = context.correlationId.getOrElse(UUID.randomUUID().toString)
+    val corrId = Option(context.correlationId).getOrElse(UUID.randomUUID().toString)
 
     val propsBldr = new BasicProperties().builder()
       .deliveryMode(if (responseClass != null) 1 else 2)   // 2 → persistent
-      .messageId(UUID.randomUUID().toString)
+      .messageId(context.get(Headers.ClientMessageId).getOrElse(UUID.randomUUID()).toString)
       .headers(Map(
         Headers.CorrelationId    → corrId,
         Headers.RetryAttemptsMax → context.maxRetries.getOrElse(if (responseClass != null) 0 else DefaultCommandRetries) // commands retriable by default

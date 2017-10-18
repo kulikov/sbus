@@ -8,20 +8,21 @@ import com.github.sstone.amqp.Amqp
 
 
 case class Context(data: Map[String, Any] = Map.empty) {
-  def get(key: String) = data.get(key)
+  def get(key: String): Option[Any] = data.get(key)
 
-  def timeout = get(Headers.Timeout).map(_.toString.toLong)
-  def maxRetries = get(Headers.RetryAttemptsMax).map(_.toString.toInt)
-  def attemptNr = get(Headers.RetryAttemptNr).fold(1)(_.toString.toInt)
-  def correlationId = get(Headers.CorrelationId).map(_.toString)
+  def timeout: Option[Long]   = get(Headers.Timeout).map(_.toString.toLong)
+  def maxRetries: Option[Int] = get(Headers.RetryAttemptsMax).map(_.toString.toInt)
+  def attemptNr: Int          = get(Headers.RetryAttemptNr).fold(1)(_.toString.toInt)
+  def correlationId: String   = get(Headers.CorrelationId).map(_.toString).orNull
+  def messageId: String       = get(Headers.MessageId).map(_.toString).orNull
+  def routingKey: String      = get(Headers.RoutingKey).map(_.toString).orNull
 
-  def withCorrelationId(id: String) = copy(data = data + (Headers.CorrelationId → id))
-
-  def withTimeout(to: Timeout): Context = withTimeout(to.duration.toMillis)
+  def withValue(key: String, value: Any): Context       = copy(data = data + (key → value))
+  def withCorrelationId(id: String): Context            = withValue(Headers.CorrelationId, id)
+  def withTimeout(to: Timeout): Context                 = withTimeout(to.duration.toMillis)
   def withTimeout(value: Long, unit: TimeUnit): Context = withTimeout(Timeout(value, unit))
-  def withTimeout(millis: Long): Context = copy(data = data + (Headers.Timeout → millis))
-
-  def withRetries(max: Int) = copy(data = data + (Headers.RetryAttemptsMax → max))
+  def withTimeout(millis: Long): Context                = withValue(Headers.Timeout, millis)
+  def withRetries(max: Int): Context                    = withValue(Headers.RetryAttemptsMax, max)
 }
 
 
@@ -37,15 +38,15 @@ object Context {
 
   def withRetries(max: Int) = Context().withRetries(max)
 
-  def from(delivery: Amqp.Delivery) = {
-    if (delivery.properties.getHeaders == null) {
-      Context.empty
-    } else {
-      val heads = delivery.properties.getHeaders.asScala.filterKeys(Headers.all).mapValues(_.toString).toMap
+  def from(delivery: Amqp.Delivery): Context = {
+    val data = Map.newBuilder[String, Any]
+    data += Headers.MessageId → delivery.properties.getMessageId
+    data += Headers.RoutingKey → delivery.envelope.getRoutingKey
 
-      Context(heads ++ Map(
-        Headers.MessageId → delivery.properties.getMessageId
-      ))
+    if (delivery.properties.getHeaders != null) {
+      data ++= delivery.properties.getHeaders.asScala.filterKeys(Headers.all)
     }
+
+    Context(data.result())
   }
 }
