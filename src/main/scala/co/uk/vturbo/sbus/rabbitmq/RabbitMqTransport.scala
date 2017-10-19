@@ -2,10 +2,11 @@ package co.uk.vturbo.sbus.rabbitmq
 
 import java.util
 import java.util.UUID
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{CompletionException, TimeUnit}
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.control.NonFatal
 
 import akka.actor.ActorSystem
 import akka.pattern.{ask, AskTimeoutException}
@@ -191,7 +192,8 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
           } catch {
             case e: Throwable ⇒ Future.failed(e)
           }) recover {
-            case e: Throwable ⇒ onFailure(delivery, e)
+            case e: CompletionException ⇒ onFailure(delivery, e.getCause)
+            case NonFatal(e: Exception) ⇒ onFailure(delivery, e)
           }
         }
       }
