@@ -162,6 +162,8 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
                 RpcServer.ProcessResult(Some(bytes))
 
               case _ ⇒ RpcServer.ProcessResult(None)
+            } recover {
+              case e: CompletionException if e.getCause != null ⇒ throw e.getCause // unwrap java future errors
             } recoverWith {
               case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
                 throw new BadRequestError(e.getMessage, e)
