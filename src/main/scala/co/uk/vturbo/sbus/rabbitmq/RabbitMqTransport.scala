@@ -10,6 +10,7 @@ import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
+import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.github.sstone.amqp._
 import com.rabbitmq.client.ConnectionFactory
@@ -161,7 +162,10 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
               case _ ⇒ RpcServer.ProcessResult(None)
             } recoverWith {
-              case e: Throwable if !e.isInstanceOf[UnrecoverableFailure] ⇒
+              case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
+                throw new BadRequestError(e.getMessage, e)
+
+              case e: Throwable if !e.isInstanceOf[UnrecoverableFailure]  ⇒
                 val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
                 val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
                 val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
