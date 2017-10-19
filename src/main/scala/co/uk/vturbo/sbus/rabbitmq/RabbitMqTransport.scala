@@ -12,8 +12,8 @@ import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.github.sstone.amqp._
-import com.rabbitmq.client.AMQP.BasicProperties
 import com.rabbitmq.client.ConnectionFactory
+import com.rabbitmq.client.AMQP.BasicProperties
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.Logger
 import org.slf4j.{LoggerFactory, MDC}
@@ -94,28 +94,30 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     val pub = Amqp.Publish(CommonExchange.name, routingKey, bytes, Some(propsBldr.build()))
 
     (if (responseClass != null) {
-      rpcClient.ask(RpcClient.Request(pub))(context.timeout.fold(defaultTimeout)(_.millis)) map {
-        case RpcClient.Response(deliveries) ⇒
-          logs("resp <~~~", routingKey, deliveries.head.body, corrId)
+      meter("request", routingKey) {
+        rpcClient.ask(RpcClient.Request(pub))(context.timeout.fold(defaultTimeout)(_.millis)) map {
+          case RpcClient.Response(deliveries) ⇒
+            logs("resp <~~~", routingKey, deliveries.head.body, corrId)
 
-          val tree = mapper.readTree(deliveries.head.body)
+            val tree = mapper.readTree(deliveries.head.body)
 
-          val status =
-            if (tree.hasNonNull("status")) {
-              tree.path("status").asInt
-            } else if (tree.path("failed").asBoolean(false)) { // backward compatibility with old protocol
-              500
-            } else { 200 }
+            val status =
+              if (tree.hasNonNull("status")) {
+                tree.path("status").asInt
+              } else if (tree.path("failed").asBoolean(false)) { // backward compatibility with old protocol
+                500
+              } else { 200 }
 
-          if (status < 400)  {
-            deserializeToClass(tree.path("body"), responseClass)
-          } else {
-            val err = mapper.treeToValue(tree.path("body"), classOf[ErrorResponseBody])
-            throw new ErrorMessage(status, err.getMessage, error = err.getError, _links = err.getLinks)
-          }
+            if (status < 400)  {
+              deserializeToClass(tree.path("body"), responseClass)
+            } else {
+              val err = mapper.treeToValue(tree.path("body"), classOf[ErrorResponseBody])
+              throw new ErrorMessage(status, err.getMessage, error = err.getError, _links = err.getLinks)
+            }
 
-        case other ⇒
-          throw new ErrorMessage(500, "Unexpected request result " + routingKey + ":" + other)
+          case other ⇒
+            throw new ErrorMessage(500, "Unexpected request result " + routingKey + ":" + other)
+        }
       }
     } else {
       producer ? pub map {
@@ -140,51 +142,53 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     val processor = new RpcServer.IProcessor {
 
       def process(delivery: Amqp.Delivery): Future[RpcServer.ProcessResult] = {
-        (try {
-          logs("<~~~", routingKey, delivery.body, getCorrelationId(delivery))
+        meter("handle", routingKey) {
+          (try {
+            logs("<~~~", routingKey, delivery.body, getCorrelationId(delivery))
 
-          val payload = (mapper.readTree(delivery.body).get("body") match {
-            case null ⇒ null
-            case body ⇒ deserializeToClass(body, messageClass)
-          }).asInstanceOf[T]
+            val payload = (mapper.readTree(delivery.body).get("body") match {
+              case null ⇒ null
+              case body ⇒ deserializeToClass(body, messageClass)
+            }).asInstanceOf[T]
 
-          (try handler(payload, Context.from(delivery)) catch {
-            case e: Throwable ⇒ Future.failed(e)
-          }) map {
-            case result if delivery.properties.getReplyTo != null ⇒
-              val bytes = mapper.writeValueAsBytes(new Response(200, result))
-              logs("resp ~~~>", routingKey, bytes, getCorrelationId(delivery))
-              RpcServer.ProcessResult(Some(bytes))
+            (try handler(payload, Context.from(delivery)) catch {
+              case e: Throwable ⇒ Future.failed(e)
+            }) map {
+              case result if delivery.properties.getReplyTo != null ⇒
+                val bytes = mapper.writeValueAsBytes(new Response(200, result))
+                logs("resp ~~~>", routingKey, bytes, getCorrelationId(delivery))
+                RpcServer.ProcessResult(Some(bytes))
 
-            case _ ⇒ RpcServer.ProcessResult(None)
-          } recoverWith {
-            case e: Throwable if !e.isInstanceOf[UnrecoverableFailure] ⇒
-              val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
-              val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
-              val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
+              case _ ⇒ RpcServer.ProcessResult(None)
+            } recoverWith {
+              case e: Throwable if !e.isInstanceOf[UnrecoverableFailure] ⇒
+                val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
+                val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
+                val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
 
-              if (attemptsMax.exists(_ >= attemptNr)) {
-                heads.put(Headers.RetryAttemptNr, s"${attemptNr + 1}")
+                if (attemptsMax.exists(_ >= attemptNr)) {
+                  heads.put(Headers.RetryAttemptNr, s"${attemptNr + 1}")
 
-                val updProps = delivery.properties.builder()
-                  .headers(heads)
-                  .expiration(s"${math.pow(2, math.min(attemptNr - 1, 7)).round * 1000}") // millis, exponential backoff
-                  .build()
+                  val updProps = delivery.properties.builder()
+                    .headers(heads)
+                    .expiration(s"${math.pow(2, math.min(attemptNr - 1, 7)).round * 1000}") // millis, exponential backoff
+                    .build()
 
-                logs("error", routingKey, s"$e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...".getBytes, getCorrelationId(delivery), e)
+                  logs("error", routingKey, s"$e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...".getBytes, getCorrelationId(delivery), e)
 
-                producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
-                  case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
-                  case error      ⇒ throw new ErrorMessage(500, "Error on publish retry message for " + routingKey + ": " + error)
+                  producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
+                    case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
+                    case error      ⇒ throw new ErrorMessage(500, "Error on publish retry message for " + routingKey + ": " + error)
+                  }
+                } else {
+                  Future.failed(e)
                 }
-              } else {
-                Future.failed(e)
-              }
+            }
+          } catch {
+            case e: Throwable ⇒ Future.failed(e)
+          }) recover {
+            case e: Throwable ⇒ onFailure(delivery, e)
           }
-        } catch {
-          case e: Throwable ⇒ Future.failed(e)
-        }) recover {
-          case e: Throwable ⇒ onFailure(delivery, e)
         }
       }
 

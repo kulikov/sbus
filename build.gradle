@@ -21,5 +21,7 @@ dependencies {
     compile 'com.rabbitmq:amqp-client:4.2.2'
     compile 'eu.shiftforward:amqp-client_2.12:1.6.0'
 
+    compile 'io.prometheus:simpleclient:0.0.26'
+
     compile 'com.typesafe.scala-logging:scala-logging_2.12:3.7.2'
 }

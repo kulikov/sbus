@@ -34,10 +34,10 @@ class Sbus(transport: Transport) {
     transport.send(routingKey, message, context, null).toJava.toCompletableFuture.thenAccept(_ ⇒ {})
 
   def event(routingKey: String, message: Any): CompletableFuture[Void] =
-    event(routingKey, message, Context.empty)
+    command(routingKey, message, Context.empty)
 
   def event(routingKey: String, message: Any, context: Context): CompletableFuture[Void] =
-    transport.send(routingKey, message, context, null).toJava.toCompletableFuture.thenAccept(_ ⇒ {})
+    command(routingKey, message, context)
 
   def on[T](routingKey: String, requestClass: Class[T], handler: BiFunction[T, Context, CompletableFuture[_]]) {
     transport.subscribe[T](routingKey, requestClass, { (resp, ctx) ⇒
