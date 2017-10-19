@@ -38,13 +38,7 @@ class MethodNotAllowedError(msg: String, cause: Throwable = null, error: String 
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
 
-
 class ConflictError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(409, msg, cause, error) {
-  def this(msg: String) = this(msg, null, null)
-  def this(msg: String, cause: Throwable) = this(msg, cause, null)
-}
-
-class PreconditionFailedError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(412, msg, cause, error) {
   def this(msg: String) = this(msg, null, null)
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
