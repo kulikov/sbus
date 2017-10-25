@@ -1,5 +1,6 @@
 package co.uk.vturbo.sbus.model
 
+import java.util.UUID
 import scala.collection.JavaConverters._
 import scala.concurrent.duration.TimeUnit
 
@@ -17,7 +18,13 @@ case class Context(data: Map[String, Any] = Map.empty) {
   def messageId: String       = get(Headers.MessageId).map(_.toString).orNull
   def routingKey: String      = get(Headers.RoutingKey).map(_.toString).orNull
 
-  def withValue(key: String, value: Any): Context       = copy(data = data + (key → value))
+  def withValue(key: String, value: Any): Context =
+    if (value == null) {
+      copy(data = data - key)
+    } else {
+      copy(data = data + (key → value))
+    }
+
   def withCorrelationId(id: String): Context            = withValue(Headers.CorrelationId, id)
   def withTimeout(to: Timeout): Context                 = withTimeout(to.duration.toMillis)
   def withTimeout(value: Long, unit: TimeUnit): Context = withTimeout(Timeout(value, unit))
@@ -40,13 +47,13 @@ object Context {
 
   def from(delivery: Amqp.Delivery): Context = {
     val data = Map.newBuilder[String, Any]
-    data += Headers.MessageId → delivery.properties.getMessageId
+    data += Headers.MessageId → Option(delivery.properties.getMessageId).getOrElse(UUID.randomUUID().toString)
     data += Headers.RoutingKey → delivery.envelope.getRoutingKey
 
     if (delivery.properties.getHeaders != null) {
       data ++= delivery.properties.getHeaders.asScala.filterKeys(Headers.all)
     }
 
-    Context(data.result())
+    Context(data.result().filter(_._2 != null))
   }
 }
