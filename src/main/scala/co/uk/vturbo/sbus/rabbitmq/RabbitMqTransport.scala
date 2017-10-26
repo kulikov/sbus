@@ -231,12 +231,9 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     Amqp.waitForConnection(actorSystem, rpcServer).await()
   }
 
-
   private def deserializeToClass(node: JsonNode, responseClass: Class[_]): Any = {
-    if (responseClass == java.lang.Void.TYPE) {
-      //
-    } else if (responseClass.isInstance(Unit)) {
-      //
+    if (responseClass == classOf[java.lang.Void] || responseClass == java.lang.Void.TYPE || responseClass.isInstance(Unit)) {
+      // return nothing
     } else {
       mapper.treeToValue(node, responseClass)
     }
