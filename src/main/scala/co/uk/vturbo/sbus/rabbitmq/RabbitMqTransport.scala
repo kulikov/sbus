@@ -141,6 +141,8 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
    *
    */
   def subscribe[T](routingKey: String, messageClass: Class[_], handler: (T, Context) ⇒ Future[Any]): Unit = {
+    require(messageClass != null, "messageClass is required!")
+
     val processor = new RpcServer.IProcessor {
 
       def process(delivery: Amqp.Delivery): Future[RpcServer.ProcessResult] = {
