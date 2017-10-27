@@ -1,5 +1,7 @@
 package co.uk.vturbo.sbus.model
 
+import com.fasterxml.jackson.core.JsonProcessingException
+
 
 class ErrorMessage(
   val code: Int,
@@ -11,6 +13,14 @@ class ErrorMessage(
 
 
 trait UnrecoverableFailure
+
+object UnrecoverableFailures {
+  def contains(e: Throwable) = e match {
+    case null ⇒ false
+    case _: UnrecoverableFailure | _: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException ⇒ true
+    case _ ⇒ false
+  }
+}
 
 
 class BadRequestError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(400, msg, cause, error) with UnrecoverableFailure {
