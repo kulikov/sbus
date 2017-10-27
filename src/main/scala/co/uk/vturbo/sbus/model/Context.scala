@@ -30,6 +30,7 @@ case class Context(data: Map[String, Any] = Map.empty) {
   def withTimeout(value: Long, unit: TimeUnit): Context = withTimeout(Timeout(value, unit))
   def withTimeout(millis: Long): Context                = withValue(Headers.Timeout, millis)
   def withRetries(max: Int): Context                    = withValue(Headers.RetryAttemptsMax, max)
+  def withRoutingKey(key: String): Context              = withValue(Headers.RoutingKey, key)
 }
 
 
