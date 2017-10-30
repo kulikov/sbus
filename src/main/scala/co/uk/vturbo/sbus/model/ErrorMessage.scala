@@ -28,27 +28,27 @@ class BadRequestError(msg: String, cause: Throwable = null, error: String = null
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
 
-class UnauthorizedError(msg: String, cause: Throwable = null, error: String = null, val schema: Option[String] = None) extends ErrorMessage(401, msg, cause, error) {
+class UnauthorizedError(msg: String, cause: Throwable = null, error: String = null, val schema: Option[String] = None) extends ErrorMessage(401, msg, cause, error) with UnrecoverableFailure {
   def this(msg: String) = this(msg, null, null)
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
 
-class ForbiddenError(msg: String, cause: Throwable = null, error: String = null, _links: java.util.Map[String, Object] = null) extends ErrorMessage(403, msg, cause, error, _links) {
+class ForbiddenError(msg: String, cause: Throwable = null, error: String = null, _links: java.util.Map[String, Object] = null) extends ErrorMessage(403, msg, cause, error, _links) with UnrecoverableFailure {
   def this(msg: String) = this(msg, null, null)
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
 
-class NotFoundError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(404, msg, cause, error) {
+class NotFoundError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(404, msg, cause, error) with UnrecoverableFailure {
   def this(msg: String) = this(msg, null, null)
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
 
-class MethodNotAllowedError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(405, msg, cause, error) {
+class MethodNotAllowedError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(405, msg, cause, error) with UnrecoverableFailure {
   def this(msg: String) = this(msg, null, null)
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
 
-class ConflictError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(409, msg, cause, error) {
+class ConflictError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(409, msg, cause, error) with UnrecoverableFailure {
   def this(msg: String) = this(msg, null, null)
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
 }
