@@ -2,7 +2,7 @@ package co.uk.vturbo.sbus.rabbitmq
 
 import java.util
 import java.util.UUID
-import java.util.concurrent.{CompletionException, TimeUnit}
+import java.util.concurrent.{CompletionException, ExecutionException, TimeUnit}
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -196,7 +196,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
           } catch {
             case e: Throwable ⇒ Future.failed(e)
           }) recover {
-            case e: CompletionException ⇒ onFailure(delivery, e.getCause)
+            case e @ (_: CompletionException | _: ExecutionException) ⇒ onFailure(delivery, e.getCause)
             case NonFatal(e: Exception) ⇒ onFailure(delivery, e)
           }
         }
