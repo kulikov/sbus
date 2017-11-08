@@ -168,7 +168,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
               case e: CompletionException if e.getCause != null ⇒ throw e.getCause // unwrap java future errors
             } recoverWith {
               case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
-                throw new BadRequestError(e.getMessage, e)
+                throw new BadRequestError(e.toString, e)
 
               case e: Throwable if !e.isInstanceOf[UnrecoverableFailure]  ⇒
                 val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
