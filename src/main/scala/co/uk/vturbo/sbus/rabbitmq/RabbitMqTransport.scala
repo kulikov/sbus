@@ -165,8 +165,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
               case _ ⇒ RpcServer.ProcessResult(None)
             } recover {
-              case e: CompletionException if e.getCause != null ⇒ throw e.getCause // unwrap java future errors
-              case e: RuntimeException if e.getCause != null ⇒ throw e.getCause // unwrap RuntimeException cause errors
+              case e: RuntimeException if e.getCause != null && !e.isInstanceOf[ErrorMessage] ⇒ throw e.getCause // unwrap RuntimeException cause errors
             } recoverWith {
               case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
                 throw new BadRequestError(e.toString, e)
@@ -198,7 +197,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
             case e: Throwable ⇒ Future.failed(e)
           }) recover {
             case e @ (_: CompletionException | _: ExecutionException) ⇒ onFailure(delivery, e.getCause)
-            case NonFatal(e: RuntimeException) ⇒ onFailure(delivery, if (e.getCause != null) e.getCause else e)
+            case e: RuntimeException if e.getCause != null && !e.isInstanceOf[ErrorMessage] ⇒ onFailure(delivery, e.getCause)
             case NonFatal(e: Exception) ⇒ onFailure(delivery, e)
           }
         }
