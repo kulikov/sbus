@@ -118,7 +118,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
             }
 
           case other ⇒
-            throw new ErrorMessage(500, "Unexpected request result " + routingKey + ":" + other)
+            throw new ErrorMessage(500, s"Unexpected response for `$routingKey`: $other")
         }
       }
     } else {
@@ -129,7 +129,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     }) recover {
       case e: AskTimeoutException ⇒
         logs("timeout error", routingKey, bytes, corrId, e)
-        throw new ErrorMessage(504, s"Timeout on `$routingKey` with message: $msg", e)
+        throw new ErrorMessage(504, s"Timeout on `$routingKey` with message: ${msg.getClass.getSimpleName}", e)
 
       case e: Throwable ⇒
         logs("error", routingKey, bytes, corrId, e)
