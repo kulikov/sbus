@@ -118,13 +118,13 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
             }
 
           case other ⇒
-            throw new ErrorMessage(500, s"Unexpected response for `$routingKey`: $other")
+            throw new InternalServerError(s"Unexpected response for `$routingKey`: $other")
         }
       }
     } else {
       producer ? pub map {
         case _: Amqp.Ok ⇒ // ok
-        case error ⇒ throw new ErrorMessage(500, "Error on publish message to " + routingKey + ": " + error)
+        case error ⇒ throw new InternalServerError("Error on publish message to " + routingKey + ": " + error)
       }
     }) recover {
       case e: AskTimeoutException ⇒
@@ -187,7 +187,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
                   producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
                     case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
-                    case error      ⇒ throw new ErrorMessage(500, "Error on publish retry message for " + routingKey + ": " + error)
+                    case error      ⇒ throw new InternalServerError("Error on publish retry message for " + routingKey + ": " + error)
                   }
                 } else {
                   Future.failed(e)
@@ -253,9 +253,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
   private def logs(prefix: String, routingKey: String, body: Array[Byte], correlationId: String, e: Throwable = null) {
     if (log.underlying.isTraceEnabled) {
-      if (correlationId != null) {
-        MDC.put("correlation_id", correlationId)
-      }
+      MDC.put("correlation_id", correlationId)
 
       val msg = s"sbus $prefix $routingKey: ${new String(body.take(conf.getInt("log-trim-length")))}"
       if (e == null) log.trace(msg) else log.error(msg, e)
