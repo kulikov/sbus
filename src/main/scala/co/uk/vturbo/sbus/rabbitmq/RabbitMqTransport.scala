@@ -145,7 +145,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
 
     val processor = new RpcServer.IProcessor {
 
-      def process(delivery: Amqp.Delivery): Future[RpcServer.ProcessResult] = {
+      def process(delivery: Amqp.Delivery): Future[RpcServer.ProcessResult] =
         meter("handle", routingKey) {
           (try {
             logs("<~~~", routingKey, delivery.body, getCorrelationId(delivery))
@@ -155,53 +155,50 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
               case body ⇒ deserializeToClass(body, messageClass)
             }).asInstanceOf[T]
 
-            (try handler(payload, Context.from(delivery)) catch {
-              case e: Throwable ⇒ Future.failed(e)
-            }) map {
-              case result if delivery.properties.getReplyTo != null ⇒
-                val bytes = mapper.writeValueAsBytes(new Response(200, result))
-                logs("resp ~~~>", routingKey, bytes, getCorrelationId(delivery))
-                RpcServer.ProcessResult(Some(bytes))
-
-              case _ ⇒ RpcServer.ProcessResult(None)
-            } recover {
-              case e: RuntimeException if e.getCause != null && !e.isInstanceOf[ErrorMessage] ⇒ throw e.getCause // unwrap RuntimeException cause errors
-            } recoverWith {
-              case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
-                throw new BadRequestError(e.toString, e)
-
-              case e: Throwable if !e.isInstanceOf[UnrecoverableFailure]  ⇒
-                val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
-                val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
-                val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
-
-                if (attemptsMax.exists(_ >= attemptNr)) {
-                  heads.put(Headers.RetryAttemptNr, s"${attemptNr + 1}")
-
-                  val updProps = delivery.properties.builder()
-                    .headers(heads)
-                    .expiration(s"${math.pow(2, math.min(attemptNr - 1, 7)).round * 1000}") // millis, exponential backoff
-                    .build()
-
-                  logs("error", routingKey, s"$e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...".getBytes, getCorrelationId(delivery), e)
-
-                  producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
-                    case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
-                    case error      ⇒ throw new InternalServerError("Error on publish retry message for " + routingKey + ": " + error)
-                  }
-                } else {
-                  Future.failed(e)
-                }
-            }
+            handler(payload, Context.from(delivery))
           } catch {
             case e: Throwable ⇒ Future.failed(e)
-          }) recover {
+          }) map {
+            case result if delivery.properties.getReplyTo != null ⇒
+              val bytes = mapper.writeValueAsBytes(new Response(200, result))
+              logs("resp ~~~>", routingKey, bytes, getCorrelationId(delivery))
+              RpcServer.ProcessResult(Some(bytes))
+
+            case _ ⇒ RpcServer.ProcessResult(None)
+          } recover {
+            case e: RuntimeException if e.getCause != null && !e.isInstanceOf[ErrorMessage] ⇒ throw e.getCause // unwrap RuntimeException cause errors
+          } recoverWith {
+            case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
+              throw new BadRequestError(e.toString, e)
+
+            case e: Throwable if !e.isInstanceOf[UnrecoverableFailure]  ⇒
+              val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
+              val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
+              val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
+
+              if (attemptsMax.exists(_ >= attemptNr)) {
+                heads.put(Headers.RetryAttemptNr, s"${attemptNr + 1}")
+
+                val updProps = delivery.properties.builder()
+                  .headers(heads)
+                  .expiration(s"${math.pow(2, math.min(attemptNr - 1, 7)).round * 1000}") // millis, exponential backoff
+                  .build()
+
+                logs("error", routingKey, s"$e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...".getBytes, getCorrelationId(delivery), e)
+
+                producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
+                  case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
+                  case error      ⇒ throw new InternalServerError("Error on publish retry message for " + routingKey + ": " + error)
+                }
+              } else {
+                Future.failed(e)
+              }
+          } recover {
             case e @ (_: CompletionException | _: ExecutionException) ⇒ onFailure(delivery, e.getCause)
             case e: RuntimeException if e.getCause != null && !e.isInstanceOf[ErrorMessage] ⇒ onFailure(delivery, e.getCause)
             case NonFatal(e: Exception) ⇒ onFailure(delivery, e)
           }
         }
-      }
 
       def onFailure(delivery: Amqp.Delivery, e: Throwable): RpcServer.ProcessResult = {
         logs("error", routingKey, e.toString.getBytes, getCorrelationId(delivery), e)
