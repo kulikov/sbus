@@ -171,6 +171,9 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
             case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
               throw new BadRequestError(e.toString, e)
 
+            case e: IllegalStateException ⇒
+              throw new ConflictError(e.toString, e)
+
             case e: Throwable if !e.isInstanceOf[UnrecoverableFailure]  ⇒
               val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
               val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)

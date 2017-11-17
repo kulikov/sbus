@@ -17,7 +17,7 @@ trait UnrecoverableFailure
 object UnrecoverableFailures {
   def contains(e: Throwable) = e match {
     case null ⇒ false
-    case _: UnrecoverableFailure | _: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException ⇒ true
+    case _: UnrecoverableFailure | _: NullPointerException | _: IllegalArgumentException | _: IllegalStateException | _: JsonProcessingException ⇒ true
     case _ ⇒ false
   }
 }
@@ -71,4 +71,23 @@ class ServiceUnavailableError(msg: String, cause: Throwable = null, error: Strin
 class UnrecoverableError(msg: String, cause: Throwable = null, error: String = null) extends ErrorMessage(456, msg, cause, error) with UnrecoverableFailure {
   def this(msg: String) = this(msg, null, null)
   def this(msg: String, cause: Throwable) = this(msg, cause, null)
+}
+
+
+object Check {
+  def req(cond: Boolean, message: String) = require(cond, throw new BadRequestError(message))
+
+  def allow(cond: Boolean, message: String) = require(cond, throw new ForbiddenError(message.toString))
+
+  def allowFor(userId: String, ownerId: String, message: String) =
+    require(userId != null && ownerId == userId, throw new ForbiddenError(message))
+
+  def allowFor(userId: String, ownerId1: String, ownerId2: String, message: String) =
+    require(userId != null && (ownerId1 == userId || ownerId2 == userId), throw new ForbiddenError(message))
+
+  def allowIfNonEmpty(userId: String, ownerId: String, message: String) =
+    require(userId == null || ownerId == userId, throw new ForbiddenError(message))
+
+  def allowIfNonEmpty(userId: String, ownerId1: String, ownerId2: String, message: String) =
+    require(userId == null || ownerId1 == userId || ownerId2 == userId, throw new ForbiddenError(message))
 }
