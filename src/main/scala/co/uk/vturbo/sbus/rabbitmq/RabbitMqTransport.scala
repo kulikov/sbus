@@ -86,10 +86,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
         Headers.RetryAttemptsMax → context.maxRetries.getOrElse(if (responseClass != null) 0 else DefaultCommandRetries) // commands retriable by default
       ).mapValues(_.toString.asInstanceOf[Object]).asJava)
 
-    // timeout only for req/resp messages
-    if (responseClass != null && context.timeout.nonEmpty) {
-      propsBldr.expiration(context.timeout.get.toString)
-    }
+    context.timeout.foreach(ms ⇒ propsBldr.expiration(ms.toString))
 
     logs("~~~>", routingKey, bytes, corrId)
 
