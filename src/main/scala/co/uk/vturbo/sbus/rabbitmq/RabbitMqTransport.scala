@@ -81,12 +81,12 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     val propsBldr = new BasicProperties().builder()
       .deliveryMode(if (responseClass != null) 1 else 2)   // 2 → persistent
       .messageId(context.get(Headers.ClientMessageId).getOrElse(UUID.randomUUID()).toString)
+      .expiration(context.timeout.map(_.toString).orNull)
       .headers(Map(
         Headers.CorrelationId    → corrId,
-        Headers.RetryAttemptsMax → context.maxRetries.getOrElse(if (responseClass != null) 0 else DefaultCommandRetries) // commands retriable by default
-      ).mapValues(_.toString.asInstanceOf[Object]).asJava)
-
-    context.timeout.foreach(ms ⇒ propsBldr.expiration(ms.toString))
+        Headers.RetryAttemptsMax → context.maxRetries.getOrElse(if (responseClass != null) 0 else DefaultCommandRetries), // commands retriable by default
+        Headers.ExpiredAt        → context.timeout.map(_ + System.currentTimeMillis()).getOrElse(null)
+      ).filter(_._2 != null).mapValues(_.toString.asInstanceOf[Object]).asJava)
 
     logs("~~~>", routingKey, bytes, corrId)
 
@@ -175,8 +175,9 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
               val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
               val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
               val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
+              val expired     = Option(heads.get(Headers.ExpiredAt)).exists(_.toString.toLong <= System.currentTimeMillis()) // original expiration
 
-              if (attemptsMax.exists(_ >= attemptNr)) {
+              if (attemptsMax.exists(_ >= attemptNr) && !expired) {
                 heads.put(Headers.RetryAttemptNr, s"${attemptNr + 1}")
 
                 val updProps = delivery.properties.builder()
