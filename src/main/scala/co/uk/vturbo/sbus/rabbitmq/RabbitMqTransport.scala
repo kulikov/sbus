@@ -175,21 +175,28 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
               val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
               val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
               val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
-              val expired     = Option(heads.get(Headers.ExpiredAt)).exists(_.toString.toLong <= System.currentTimeMillis()) // original expiration
 
-              if (attemptsMax.exists(_ >= attemptNr) && !expired) {
+              if (attemptsMax.exists(_ >= attemptNr)) {
                 heads.put(Headers.RetryAttemptNr, s"${attemptNr + 1}")
+
+                val backoff = math.pow(2, math.min(attemptNr - 1, 7)).round * 1000
 
                 val updProps = delivery.properties.builder()
                   .headers(heads)
-                  .expiration(s"${math.pow(2, math.min(attemptNr - 1, 7)).round * 1000}") // millis, exponential backoff
+                  .expiration(backoff.toString) // millis, exponential backoff
                   .build()
 
-                logs("error", routingKey, s"$e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...".getBytes, getCorrelationId(delivery), e)
+                // if message will be expired before next attempt — skip it
+                if (Option(heads.get(Headers.ExpiredAt)).exists(_.toString.toLong <= System.currentTimeMillis() + backoff)) {
+                  logs("timeout", routingKey, s"Message will be expired at ${heads.get(Headers.ExpiredAt)}, don't retry it!".getBytes, getCorrelationId(delivery), e)
+                  Future.failed(e)
+                } else {
+                  logs("error", routingKey, s"$e. Retry attempt ${attemptNr + 1} after ${updProps.getExpiration} millis...".getBytes, getCorrelationId(delivery), e)
 
-                producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
-                  case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
-                  case error      ⇒ throw new InternalServerError("Error on publish retry message for " + routingKey + ": " + error)
+                  producer ? Amqp.Publish(RetryExchange.name, routingKey, delivery.body, Some(updProps), mandatory = false) map {
+                    case _: Amqp.Ok ⇒ RpcServer.ProcessResult(None)
+                    case error      ⇒ throw new InternalServerError("Error on publish retry message for " + routingKey + ": " + error)
+                  }
                 }
               } else {
                 Future.failed(e)
