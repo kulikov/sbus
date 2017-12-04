@@ -36,6 +36,15 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
   private val CommonExchange        = Amqp.ExchangeParameters(conf.getString("exchange"), passive = false, exchangeType = "direct")
   private val RetryExchange         = Amqp.ExchangeParameters(conf.getString("retry-exchange"), passive = false, exchangeType = "fanout")
 
+  private val queueConfigs: Map[String, QueueConfig] =
+    conf.getConfig("queues").atPath("/").getObject("/").asScala.toMap map { case (name, obj) ⇒
+      val cfg = obj.atPath("/").getConfig("/")
+
+      name → QueueConfig(
+        name   = name,
+        fanout = if (cfg.hasPath("fanout")) cfg.getBoolean("fanout") else false
+      )
+    }
 
   private val connection = actorSystem.actorOf(ConnectionOwner.props({
     log.debug("Sbus connecting to: " + conf.getString("host"))
@@ -79,13 +88,13 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     val corrId = Option(context.correlationId).getOrElse(UUID.randomUUID().toString)
 
     val propsBldr = new BasicProperties().builder()
-      .deliveryMode(if (responseClass != null) 1 else 2)   // 2 → persistent
+      .deliveryMode(if (responseClass != null) 1 else 2) // 2 → persistent
       .messageId(context.get(Headers.ClientMessageId).getOrElse(UUID.randomUUID()).toString)
       .expiration(context.timeout.map(_.toString).orNull)
       .headers(Map(
-        Headers.CorrelationId    → corrId,
+        Headers.CorrelationId → corrId,
         Headers.RetryAttemptsMax → context.maxRetries.getOrElse(if (responseClass != null) 0 else DefaultCommandRetries), // commands retriable by default
-        Headers.ExpiredAt        → context.timeout.map(_ + System.currentTimeMillis()).getOrElse(null)
+        Headers.ExpiredAt → context.timeout.map(_ + System.currentTimeMillis()).getOrElse(null)
       ).filter(_._2 != null).mapValues(_.toString.asInstanceOf[Object]).asJava)
 
     logs("~~~>", routingKey, bytes, corrId)
@@ -107,7 +116,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
                 500
               } else { 200 }
 
-            if (status < 400)  {
+            if (status < 400) {
               deserializeToClass(tree.path("body"), responseClass)
             } else {
               val err = mapper.treeToValue(tree.path("body"), classOf[ErrorResponseBody])
@@ -165,13 +174,13 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
           } recover {
             case e: RuntimeException if e.getCause != null && !e.isInstanceOf[ErrorMessage] ⇒ throw e.getCause // unwrap RuntimeException cause errors
           } recoverWith {
-            case e @ (_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
+            case e@(_: NullPointerException | _: IllegalArgumentException | _: JsonProcessingException) ⇒
               throw new BadRequestError(e.toString, e)
 
             case e: IllegalStateException ⇒
               throw new ConflictError(e.toString, e)
 
-            case e: Throwable if !e.isInstanceOf[UnrecoverableFailure]  ⇒
+            case e: Throwable if !e.isInstanceOf[UnrecoverableFailure] ⇒
               val heads       = Option(delivery.properties.getHeaders).getOrElse(new util.HashMap[String, Object]())
               val attemptsMax = Option(heads.get(Headers.RetryAttemptsMax)).map(_.toString.toInt)
               val attemptNr   = Option(heads.get(Headers.RetryAttemptNr)).fold(1)(_.toString.toInt)
@@ -226,8 +235,16 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
       }
     }
 
+    val queue = queueConfigs.get(routingKey) match {
+      case Some(qcfg) if qcfg.fanout ⇒
+        Amqp.QueueParameters("", passive = false, durable = false, exclusive = true, autodelete = true)
+
+      case _ ⇒
+        Amqp.QueueParameters(routingKey, passive = false, durable = false, exclusive = false, autodelete = false)
+    }
+
     val rpcServer = ConnectionOwner.createChildActor(connection, RpcServer.props(
-      queue         = Amqp.QueueParameters(routingKey, passive = false, durable = false, exclusive = false, autodelete = false),
+      queue         = queue,
       exchange      = CommonExchange,
       routingKey    = routingKey,
       proc          = processor,
@@ -265,3 +282,9 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     }
   }
 }
+
+
+case class QueueConfig(
+  name: String,
+  fanout: Boolean
+)
