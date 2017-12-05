@@ -150,13 +150,12 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     require(messageClass != null, "messageClass is required!")
 
     val processor = new RpcServer.IProcessor {
-
       def process(delivery: Amqp.Delivery): Future[RpcServer.ProcessResult] =
         meter("handle", routingKey) {
           (try {
             logs("<~~~", routingKey, delivery.body, getCorrelationId(delivery))
 
-            val payload = (mapper.readTree(delivery.body).get("body") match {
+            val payload = (Option(mapper.readTree(delivery.body)).map(_.get("body")).orNull match {
               case null ⇒ null
               case body ⇒ deserializeToClass(body, messageClass)
             }).asInstanceOf[T]
