@@ -277,7 +277,14 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
       MDC.put("correlation_id", correlationId)
 
       val msg = s"sbus $prefix $routingKey: ${new String(body.take(conf.getInt("log-trim-length")))}"
-      if (e == null) log.trace(msg) else log.error(msg, e)
+
+      if (e == null) {
+        log.trace(msg)
+      } else if (e.isInstanceOf[UnrecoverableFailure]) {
+        log.warn(msg, e)
+      } else {
+        log.error(msg, e)
+      }
     }
   }
 }
