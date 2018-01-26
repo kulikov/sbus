@@ -16,7 +16,7 @@ dependencies {
 
     compile 'org.projectlombok:lombok:1.16.18'
 
-    compile 'com.fasterxml.jackson.core:jackson-databind:2.9.2'
+    compile 'com.fasterxml.jackson.core:jackson-databind:2.9.4'
 
     compile 'com.rabbitmq:amqp-client:4.3.0'
     compile 'eu.shiftforward:amqp-client_2.12:1.6.0'
