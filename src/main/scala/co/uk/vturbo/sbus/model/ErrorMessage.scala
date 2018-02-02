@@ -11,6 +11,21 @@ class ErrorMessage(
   val _links: java.util.Map[String, Object] = null
 ) extends RuntimeException(msg, cause)
 
+object ErrorMessage {
+  def fromCode(code: Int, msg: String, cause: Throwable = null, error: String = null, _links: java.util.Map[String, Object] = null): ErrorMessage = code match {
+    case 400 ⇒ new BadRequestError(msg, cause, error)
+    case 401 ⇒ new UnauthorizedError(msg, cause, error)
+    case 403 ⇒ new ForbiddenError(msg, cause, error, _links)
+    case 404 ⇒ new NotFoundError(msg, cause, error)
+    case 405 ⇒ new MethodNotAllowedError(msg, cause, error)
+    case 409 ⇒ new ConflictError(msg, cause, error)
+    case 429 ⇒ new TooManyRequestError(msg, cause, error)
+    case 456 ⇒ new UnrecoverableError(msg, cause, error)
+    case 500 ⇒ new InternalServerError(msg, cause, error)
+    case 503 ⇒ new ServiceUnavailableError(msg, cause, error)
+    case _ ⇒ new ErrorMessage(code, msg, cause, error, _links)
+  }
+}
 
 trait UnrecoverableFailure
 

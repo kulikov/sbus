@@ -120,7 +120,7 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
               deserializeToClass(tree.path("body"), responseClass)
             } else {
               val err = mapper.treeToValue(tree.path("body"), classOf[ErrorResponseBody])
-              throw new ErrorMessage(status, err.getMessage, error = err.getError, _links = err.getLinks)
+              throw ErrorMessage.fromCode(status, err.getMessage, null, err.getError, err.getLinks)
             }
 
           case other ⇒
