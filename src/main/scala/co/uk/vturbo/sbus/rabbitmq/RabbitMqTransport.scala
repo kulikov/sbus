@@ -90,7 +90,11 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
     val propsBldr = new BasicProperties().builder()
       .deliveryMode(if (responseClass != null) 1 else 2) // 2 → persistent
       .messageId(context.get(Headers.ClientMessageId).getOrElse(UUID.randomUUID()).toString)
-      .expiration(context.timeout.map(_.toString).orNull)
+      .expiration(context.timeout match {
+        case Some(ms) ⇒ ms.toString
+        case _ if responseClass != null ⇒ defaultTimeout.duration.toMillis.toString
+        case _ ⇒ null
+      })
       .headers(Map(
         Headers.CorrelationId → corrId,
         Headers.RetryAttemptsMax → context.maxRetries.getOrElse(if (responseClass != null) 0 else DefaultCommandRetries), // commands retriable by default
