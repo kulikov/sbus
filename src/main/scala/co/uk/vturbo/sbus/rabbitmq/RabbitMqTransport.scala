@@ -286,7 +286,12 @@ class RabbitMqTransport(conf: Config, actorSystem: ActorSystem, mapper: ObjectMa
       MDC.put("correlation_id", correlationId)
 
       if (context != null) {
-        MDC.put("json", mapper.writeValueAsString(context))
+        MDC.put("json", mapper.writeValueAsString(Map(
+          "messageId"  → context.messageId,
+          "timeout"    → context.timeout.getOrElse(null),
+          "maxRetries" → context.maxRetries.getOrElse(null),
+          "attemptNr"  → context.attemptNr
+        ).asJava))
       }
 
       val msg = s"sbus $prefix $routingKey: ${new String(body.take(conf.getInt("log-trim-length")))}"
