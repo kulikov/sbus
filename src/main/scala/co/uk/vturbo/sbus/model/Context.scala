@@ -31,6 +31,7 @@ case class Context(data: Map[String, Any] = Map.empty) {
   def withTimeout(millis: Long): Context                = withValue(Headers.Timeout, millis)
   def withRetries(max: Int): Context                    = withValue(Headers.RetryAttemptsMax, max)
   def withRoutingKey(key: String): Context              = withValue(Headers.RoutingKey, key)
+  def withClientMessageId(id: String): Context          = withValue(Headers.ClientMessageId, id)
 }
 
 
@@ -48,8 +49,8 @@ object Context {
 
   def from(delivery: Amqp.Delivery): Context = {
     val data = Map.newBuilder[String, Any]
-    data += Headers.MessageId → Option(delivery.properties.getMessageId).getOrElse(UUID.randomUUID().toString)
-    data += Headers.RoutingKey → delivery.envelope.getRoutingKey
+    data += (Headers.MessageId → Option(delivery.properties.getMessageId).getOrElse(UUID.randomUUID().toString))
+    data += (Headers.RoutingKey → delivery.envelope.getRoutingKey)
 
     if (delivery.properties.getHeaders != null) {
       data ++= delivery.properties.getHeaders.asScala.filterKeys(Headers.all)
